@@ -102,26 +102,23 @@ Set keys in `backend/.env`:
 ```
 ~/.entroflow/
 ├── assets/
-│   └── unixai/                    # ← installed by setup-entroflow.sh
-│       ├── connector/
-│       │   ├── client.py          # HTTP → robot control panel
-│       │   ├── manifest.json
-│       │   └── unixai_devices.json
-│       └── devices/unixai.robot/
-│           ├── unixai.robot.py    # DeviceClass: query_status, perform_action
-│           └── readme.md
+│   ├── unixai/                    # ← installed by setup-entroflow.sh
+│   │   ├── connector/             # HTTP API connector (local-only platform)
+│   │   └── devices/unixai.robot/  # 旺达 robot driver
+│   └── mihome/
+│       └── devices/miaomiaoce.sensor_ht.t9/  # 温湿度计 driver
 └── data/
     └── devices.json               # registered device records
 ```
 
-### Registered Device
+### Registered Devices
 
-| Field | Value |
-|-------|-------|
-| device_id | `unixai:u098` |
-| name | 旺达 |
-| location | 神盾局 |
-| actions | `speak`, `start_task`, `reset_task` |
+| device_id | Name | Platform | Actions |
+|-----------|------|----------|---------|
+| `unixai:u098` | 旺达 | unixai | `speak`, `start_task`, `reset_task` |
+| `mihome:blt.3.1...` | 米家智能温湿度计3 | mihome | status-only (temperature, humidity, battery) |
+
+*The mihome connector itself is managed by EntroFlow (`entroflow connect mihome`). Only the device driver is stored in this repo.*
 
 Customize via environment variables when running the setup script:
 

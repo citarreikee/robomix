@@ -4,14 +4,14 @@ set -euo pipefail
 
 # ============================================================================
 # Robomix EntroFlow 私有资源安装脚本
-# 将仓库内的 UnixAI 平台资源链接到本机 EntroFlow 目录，并注册设备
+# 将仓库内的所有 EntroFlow 资产安装到 ~/.entroflow/assets/
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-ASSETS_SRC="$REPO_ROOT/entroflow-assets/unixai"
+SRC_ROOT="$REPO_ROOT/entroflow-assets"
 ENTROFLOW_HOME="${ENTROFLOW_HOME:-$HOME/.entroflow}"
-ASSETS_DST="$ENTROFLOW_HOME/assets/unixai"
+INSTALL_MODE="${ENTROFLOW_INSTALL_MODE:-copy}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,137 +29,134 @@ err()  { printf "${RED}✗${NC} %s\n" "$*"; }
 say "==> 检查 EntroFlow 安装状态 ..."
 
 if command -v entroflow &>/dev/null; then
-    ok "entroflow CLI 已安装: $(command -v entroflow)"
+    ok "entroflow CLI: $(command -v entroflow)"
 elif [ -f "$ENTROFLOW_HOME/cli.py" ]; then
-    ok "entroflow 源码目录存在: $ENTROFLOW_HOME"
+    ok "entroflow 源码: $ENTROFLOW_HOME"
 else
-    err "EntroFlow 未安装。请先安装 EntroFlow："
-    say "   curl -fsSL https://entroflow.ai/install | bash"
-    say "   或 pip install entroflow"
+    err "EntroFlow 未安装。请先安装 EntroFlow 再运行本脚本。"
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# 2. 链接/复制资源文件
+# 2. 安装所有平台资源
 # ---------------------------------------------------------------------------
 say ""
-say "==> 安装 UnixAI 平台资源 ..."
+say "==> 安装私有 EntroFlow 资源 ..."
 
-if [ ! -d "$ASSETS_SRC" ]; then
-    err "找不到资源源目录: $ASSETS_SRC"
+if [ ! -d "$SRC_ROOT" ]; then
+    err "找不到资源目录: $SRC_ROOT"
     exit 1
 fi
 
-# 使用符号链接（默认）或复制（macOS 某些配置下符号链接可能不被 EntroFlow 识别）
-INSTALL_MODE="${ENTROFLOW_INSTALL_MODE:-copy}"
+INSTALLED_PLATFORMS=()
 
-if [ "$INSTALL_MODE" = "symlink" ]; then
-    say "   模式: 符号链接"
-    rm -rf "$ASSETS_DST"
-    ln -s "$ASSETS_SRC" "$ASSETS_DST"
-else
-    say "   模式: 复制"
-    rm -rf "$ASSETS_DST"
-    cp -r "$ASSETS_SRC" "$ASSETS_DST"
-    # 删除可能混入的 pycache
-    find "$ASSETS_DST" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-fi
+for platform_dir in "$SRC_ROOT"/*/; do
+    platform="$(basename "$platform_dir")"
+    dst="$ENTROFLOW_HOME/assets/$platform"
 
-ok "资源已安装到: $ASSETS_DST"
+    # 跳过非目录
+    [ ! -d "$platform_dir" ] && continue
 
-# 验证关键文件
-for f in \
-    "connector/client.py" \
-    "connector/manifest.json" \
-    "connector/unixai_devices.json" \
-    "devices/unixai.robot/unixai.robot.py"; do
-    if [ -f "$ASSETS_DST/$f" ]; then
-        ok "  $f"
+    if [ "$INSTALL_MODE" = "symlink" ]; then
+        say "  链接: $platform → $dst"
+        rm -rf "$dst"
+        ln -s "$(cd "$platform_dir" && pwd)" "$dst"
     else
-        err "  缺失: $f"
+        say "  复制: $platform → $dst"
+        mkdir -p "$dst"
+        # 复制 connector（如果存在）
+        if [ -d "$platform_dir/connector" ]; then
+            rm -rf "$dst/connector"
+            cp -r "$platform_dir/connector" "$dst/connector"
+        fi
+        # 复制 devices（如果存在）
+        if [ -d "$platform_dir/devices" ]; then
+            rm -rf "$dst/devices"
+            cp -r "$platform_dir/devices" "$dst/devices"
+        fi
+        # 清理 pycache
+        find "$dst" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
     fi
+
+    INSTALLED_PLATFORMS+=("$platform")
+
+    # 列出已安装的设备模型
+    for device_dir in "$platform_dir"/devices/*/; do
+        [ -d "$device_dir" ] || continue
+        model="$(basename "$device_dir")"
+        ok "  device: $platform / $model"
+    done
 done
+
+if [ ${#INSTALLED_PLATFORMS[@]} -eq 0 ]; then
+    warn "未安装任何资源"
+else
+    ok "已安装平台: ${INSTALLED_PLATFORMS[*]}"
+fi
 
 # ---------------------------------------------------------------------------
 # 3. 注册设备
 # ---------------------------------------------------------------------------
 say ""
-say "==> 注册设备"
+say "==> 注册设备 ..."
 
-# 设备信息（按需修改）
-DEVICE_DID="${UNIXAI_DEVICE_DID:-u098}"
-DEVICE_MODEL="${UNIXAI_DEVICE_MODEL:-unixai.robot}"
-DEVICE_PLATFORM="${UNIXAI_DEVICE_PLATFORM:-unixai}"
-DEVICE_NAME="${UNIXAI_DEVICE_NAME:-旺达}"
-DEVICE_LOCATION="${UNIXAI_DEVICE_LOCATION:-神盾局}"
-DEVICE_REMARK="${UNIXAI_DEVICE_REMARK:-UnixAI 长程任务机器人 U098, 控制面板 http://192.168.0.38:5080}"
+_register() {
+    local did="$1" model="$2" platform="$3" name="$4" location="$5" remark="$6"
+    local device_id="${platform}:${did}"
+    local devices_file="$ENTROFLOW_HOME/data/devices.json"
 
-say "   did      = $DEVICE_DID"
-say "   model    = $DEVICE_MODEL"
-say "   platform = $DEVICE_PLATFORM"
-say "   name     = $DEVICE_NAME"
-say "   location = $DEVICE_LOCATION"
-
-if command -v entroflow &>/dev/null; then
-    # 优先用 entroflow CLI 注册
-    entroflow setup \
-        --platform "$DEVICE_PLATFORM" \
-        --did "$DEVICE_DID" \
-        --model "$DEVICE_MODEL" \
-        --name "$DEVICE_NAME" \
-        --location "$DEVICE_LOCATION" \
-        --remark "$DEVICE_REMARK" \
-        2>&1 || warn "entroflow setup 失败，尝试直接写入 devices.json ..."
-fi
-
-# 兜底：直接写入 devices.json
-DEVICES_FILE="$ENTROFLOW_HOME/data/devices.json"
-DEVICE_ID="${DEVICE_PLATFORM}:${DEVICE_DID}"
-
-if [ -f "$DEVICES_FILE" ]; then
-    # 检查是否已存在
-    if python3 -c "
+    # 检查是否已注册
+    if [ -f "$devices_file" ]; then
+        if python3 -c "
 import json, sys
-devices = json.load(open('$DEVICES_FILE'))
+devices = json.load(open('$devices_file'))
 ids = [d.get('device_id') for d in devices]
-sys.exit(0 if '$DEVICE_ID' in ids else 1)
+sys.exit(0 if '$device_id' in ids else 1)
 " 2>/dev/null; then
-        ok "设备已注册: $DEVICE_ID"
-    else
-        # 用 Python API 注册
-        python3 -c "
-import sys
-sys.path.insert(0, '$ENTROFLOW_HOME')
-from core import store
-store.register(
-    did='$DEVICE_DID',
-    model='$DEVICE_MODEL',
-    platform='$DEVICE_PLATFORM',
-    name='$DEVICE_NAME',
-    location='$DEVICE_LOCATION',
-    remark='$DEVICE_REMARK',
-)
-print('registered: $DEVICE_ID')
-" 2>&1 && ok "设备已注册: $DEVICE_ID" || warn "设备注册失败，请手动运行: entroflow setup ..."
+            ok "已注册: $device_id ($name)"
+            return
+        fi
     fi
-else
-    # 首次注册
-    mkdir -p "$(dirname "$DEVICES_FILE")"
-    python3 -c "
+
+    # 调用 EntroFlow Python API 注册
+    mkdir -p "$(dirname "$devices_file")"
+    if python3 -c "
 import sys
 sys.path.insert(0, '$ENTROFLOW_HOME')
 from core import store
 store.register(
-    did='$DEVICE_DID',
-    model='$DEVICE_MODEL',
-    platform='$DEVICE_PLATFORM',
-    name='$DEVICE_NAME',
-    location='$DEVICE_LOCATION',
-    remark='$DEVICE_REMARK',
+    did='$did',
+    model='$model',
+    platform='$platform',
+    name='$name',
+    location='$location',
+    remark='$remark',
 )
-print('registered: $DEVICE_ID')
-" 2>&1 && ok "设备已注册: $DEVICE_ID" || warn "设备注册失败"
-fi
+print('ok')
+" 2>&1; then
+        ok "注册成功: $device_id ($name)"
+    else
+        warn "注册失败: $device_id，请手动运行 entroflow setup"
+    fi
+}
+
+# ---- UnixAI 机器人 ----
+_register \
+    "${UNIXAI_DID:-u098}" \
+    "${UNIXAI_MODEL:-unixai.robot}" \
+    "unixai" \
+    "${UNIXAI_NAME:-旺达}" \
+    "${UNIXAI_LOCATION:-神盾局}" \
+    "UnixAI 长程任务机器人 U098, 控制面板 http://192.168.0.38:5080"
+
+# ---- 米家温湿度计 ----
+_register \
+    "${MIHOME_SENSOR_DID:-blt.3.1pa223skt0k00}" \
+    "${MIHOME_SENSOR_MODEL:-miaomiaoce.sensor_ht.t9}" \
+    "mihome" \
+    "${MIHOME_SENSOR_NAME:-米家智能温湿度计3}" \
+    "${MIHOME_SENSOR_LOCATION:-神盾局}" \
+    "神盾局温度传感器"
 
 # ---------------------------------------------------------------------------
 # 4. 完成
@@ -169,9 +166,7 @@ say "============================================"
 say "  EntroFlow 私有资源安装完成"
 say "============================================"
 say ""
-say "验证安装:"
-say "  entroflow device-search all"
+say "验证: 在 Claude Code 或 MCP 客户端中调用 device_search('all')"
 say ""
-say "如果需要修改设备信息（名称/位置/remark），编辑此脚本顶部的环境变量"
-say "或在运行时传入:"
-say "  UNIXAI_DEVICE_NAME=我的机器人 bash $0"
+say "自定义设备信息:"
+say "  UNIXAI_NAME=我的机器人 MIHOME_SENSOR_LOCATION=实验室 bash $0"
