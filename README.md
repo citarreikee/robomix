@@ -110,20 +110,37 @@ robomix/
 │   ├── services/                  # Chat orchestration, EntroFlow bridge
 │   └── tools/                     # device_search, device_status, device_control
 ├── frontend/                      # React 19 + Vite chat UI
+├── robot-sdk/                      # AGIBOT 灵犀 X2 AimDK v0.9.0
+│   └── src/                        # aimdk_msgs, ruckig, examples, py_examples
 ├── Dockerfile.ros2                # ROS2 Humble ARM64 base image
-├── Dockerfile.sdk-deps            # ROS2 + OpenCV + Ruckig + cv_bridge + ...
+├── Dockerfile.sdk-deps            # base + deps + SDK compiled with colcon
 └── README.md
 ```
 
-## ROS2 Humble SDK (Docker)
+## ROS2 Humble + AGIBOT SDK (Docker)
 
-For AGIBOT robot development on Apple Silicon:
+For AGIBOT Lingxi X2 robot development on Apple Silicon:
 
 ```bash
+# Build (includes AGIBOT AimDK v0.9.0)
 docker build -t ros2-humble-sdk -f Dockerfile.sdk-deps .
+
+# Run with network access to reach the robot
 docker run -it --rm --net host -v $PWD:/workspace ros2-humble-sdk bash
+
+# Inside the container, both ROS2 and SDK are ready:
 source /opt/ros/humble/setup.bash
+source /workspace/robot-sdk/install/setup.bash
+ros2 pkg list | grep aimdk   # aimdk_msgs, examples, py_examples, ruckig
 ```
+
+### SDK Executables (22 C++ / 23 Python)
+
+| Category | Nodes |
+|----------|-------|
+| **HAL** | echo_camera_rgbd, echo_camera_stereo, echo_camera_head_rear, echo_imu_data, echo_lidar_data, echo_head_touch_sensor, motocontrol, hand_control, omnihand_control, take_photo |
+| **MC** | mc_locomotion_velocity, preset_motion_client, get_mc_action, set_mc_action, get_current_input_source, set_mc_input_source, keyboard |
+| **Interaction** | play_tts, play_media, play_video, play_emoji, play_lights, mic_receiver |
 
 ## License
 

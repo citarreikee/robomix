@@ -19,32 +19,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-cv-bridge \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. Eigen3 (Ruckig 依赖)
+# 4. Eigen3 (SDK ruckig 依赖)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 5. Ruckig — cmake 编译安装 C++ 库 (源码从宿主机 COPY)
-COPY ruckig_src /tmp/ruckig
-RUN apt-get update && apt-get install -y --no-install-recommends cmake \
-    && rm -rf /var/lib/apt/lists/* \
-    && cd /tmp/ruckig && mkdir build && cd build \
-    && cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_EXAMPLES=OFF \
-        -DBUILD_TESTS=OFF \
-        -DBUILD_BENCHMARK=OFF \
-        -DBUILD_PYTHON_MODULE=OFF \
-    && make -j$(nproc) && make install && ldconfig \
-    && rm -rf /tmp/ruckig \
-    && apt-get purge -y cmake && apt-get autoremove -y
-
-# 确认安装
+# 确认基础依赖
 RUN python3 -c "import cv2; print('OpenCV:', cv2.__version__)" \
-    && echo "#include <ruckig/ruckig.hpp>" | g++ -std=c++17 -x c++ -c - -o /dev/null 2>&1 && echo "Ruckig C++: OK" \
     && ldconfig -p | grep -q curl && echo "libcurl: OK" \
     && dpkg -l | grep -q libncurses-dev && echo "ncurses: OK" \
-    && echo "All deps verified."
+    && dpkg -l | grep -q ros-humble-cv-bridge && echo "cv_bridge: OK" \
+    && echo "Base deps verified."
+
+# ====================================================================
+# 5. AGIBOT 灵犀 X2 AimDK 编译
+# ====================================================================
+COPY robot-sdk/src /workspace/robot-sdk/src
+
+RUN bash -c 'source /opt/ros/humble/setup.bash \
+    && cd /workspace/robot-sdk \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release' \
+    && echo "SDK build complete."
+
+# 自动 source SDK workspace
+RUN echo "source /workspace/robot-sdk/install/setup.bash" >> /etc/bash.bashrc
+
+# 验证 SDK
+RUN bash -c 'source /opt/ros/humble/setup.bash \
+    && source /workspace/robot-sdk/install/setup.bash \
+    && echo "=== aimdk_msgs ===" \
+    && ros2 pkg list | grep aimdk \
+    && echo "=== ruckig (SDK bundled) ===" \
+    && ros2 pkg list | grep ruckig \
+    && echo "=== examples ===" \
+    && ros2 pkg list | grep examples \
+    && echo "=== py_examples ===" \
+    && ros2 pkg list | grep py_examples \
+    && echo "All SDK packages verified."'
 
 ENV CMAKE_PREFIX_PATH="/opt/ros/humble:${CMAKE_PREFIX_PATH}"
 
