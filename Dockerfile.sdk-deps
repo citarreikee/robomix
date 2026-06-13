@@ -1,0 +1,52 @@
+FROM ros2-humble-arm64:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. 系统级依赖: ncurses + libcurl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libncurses-dev \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. OpenCV: C++ 开发库 + Python 绑定
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopencv-dev \
+    python3-opencv \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. cv_bridge (ROS2 Humble)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-cv-bridge \
+    && rm -rf /var/lib/apt/lists/*
+
+# 4. Eigen3 (Ruckig 依赖)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libeigen3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 5. Ruckig — cmake 编译安装 C++ 库 (源码从宿主机 COPY)
+COPY ruckig_src /tmp/ruckig
+RUN apt-get update && apt-get install -y --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/* \
+    && cd /tmp/ruckig && mkdir build && cd build \
+    && cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_BENCHMARK=OFF \
+        -DBUILD_PYTHON_MODULE=OFF \
+    && make -j$(nproc) && make install && ldconfig \
+    && rm -rf /tmp/ruckig \
+    && apt-get purge -y cmake && apt-get autoremove -y
+
+# 确认安装
+RUN python3 -c "import cv2; print('OpenCV:', cv2.__version__)" \
+    && echo "#include <ruckig/ruckig.hpp>" | g++ -std=c++17 -x c++ -c - -o /dev/null 2>&1 && echo "Ruckig C++: OK" \
+    && ldconfig -p | grep -q curl && echo "libcurl: OK" \
+    && dpkg -l | grep -q libncurses-dev && echo "ncurses: OK" \
+    && echo "All deps verified."
+
+ENV CMAKE_PREFIX_PATH="/opt/ros/humble:${CMAKE_PREFIX_PATH}"
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
